@@ -10,6 +10,8 @@ class DeviceDiscoverer {
 
   late List<NetworkInterface> _interfaces;
 
+  late int _port;
+
   static _doNowt(Exception e) {}
 
   /// defaults to port 1900 to be able to receive broadcast notifications
@@ -21,14 +23,21 @@ class DeviceDiscoverer {
     int port: 1900,
   }) async {
     _interfaces = await NetworkInterface.list();
+    _port = port;
 
-    if (ipv4) {
-      await _createSocket(InternetAddress.anyIPv4, port, onError: onError);
+    if (ipv4 || ipv6) {
+      await Future.forEach(_interfaces, (NetworkInterface interface) async {
+        await _createSockets(interface, port, ipv4: ipv4, ipv6: ipv6, onError: onError);
+      });
     }
+  }
 
-    if (ipv6) {
-      await _createSocket(InternetAddress.anyIPv6, port, onError: onError);
-    }
+  _createSockets(NetworkInterface interface, int port, {ipv4: true, ipv6: true, Function(Exception) onError: _doNowt}) async {
+    await Future.forEach(interface.addresses, (InternetAddress address) async {
+      if ((ipv4 && address.type == InternetAddressType.IPv4) || (ipv6 && address.type == InternetAddressType.IPv6)) {
+        await _createSocket(address, port, onError: onError);
+      }
+    });
   }
 
   _createSocket(
@@ -143,20 +152,20 @@ class DeviceDiscoverer {
     var buff = new StringBuffer();
 
     buff.write("M-SEARCH * HTTP/1.1\r\n");
-    buff.write("HOST: 239.255.255.250:1900\r\n");
+    buff.write("HOST: ${_v4_Multicast.address}:$_port\r\n");
     buff.write('MAN: "ssdp:discover"\r\n');
-    buff.write("MX: 1\r\n");
+    buff.write("MX: 10\r\n");
     buff.write("ST: ${searchTarget}\r\n");
     buff.write("USER-AGENT: unix/5.1 UPnP/1.1 crash/1.0\r\n\r\n");
     var data = utf8.encode(buff.toString());
 
     for (var socket in _sockets) {
       if (socket.address.type == _v4_Multicast.type) {
-        socket.send(data, _v4_Multicast, 1900);
+        socket.send(data, _v4_Multicast, _port);
       }
 
       if (socket.address.type == _v6_Multicast.type) {
-        socket.send(data, _v6_Multicast, 1900);
+        socket.send(data, _v6_Multicast, _port);
       }
     }
   }
@@ -381,3 +390,4 @@ class DiscoveredClient {
     return new Device()..loadFromXml(location, doc.rootElement);
   }
 }
+
